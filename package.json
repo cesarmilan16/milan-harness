@@ -1,0 +1,12 @@
+{
+  "name": "milan-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Harness mínimo para trabajar con agentes de código, solo o en equipo pequeño.",
+  "bin": { "milan-harness": "install.mjs" },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=18" }
+}
