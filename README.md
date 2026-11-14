@@ -14,18 +14,20 @@ Funciona con Claude Code, Codex, Cursor, Gemini CLI y OpenCode. Sin dependencias
    ```bash
    node ~/milan-harness/install.mjs . --team
    ```
-2. Abre tu agente en el proyecto y dile **«usa la skill setup»**. Explora el repo, te hace unas
-   pocas preguntas y rellena `docs/project.md`.
-3. Revisa `docs/project.md`, haz commit de todo y súbelo a `main`.
+2. Abre tu agente en el proyecto y dile una de estas dos cosas:
+   - **Proyecto nuevo: «planifica el proyecto».** Te hace unas pocas preguntas, fija el stack y
+     escribe `docs/plan.md`: hitos y tareas ordenadas, cada una con su tamaño (S, M o L).
+   - **Proyecto que ya existe: «usa la skill setup».** Explora el repo y rellena `docs/project.md`.
+3. Revisa lo que ha escrito en `docs/`, haz commit de todo y súbelo a `main`.
 
 Quien clone el proyecto después ya tiene el harness. No instala nada.
 
 ### Cada vez que trabajas
 
 1. **Abre el agente en el proyecto.** Ya sabe en qué rama estás y qué quedó pendiente.
-2. **Pide lo que quieres**, con tus palabras. El agente te dice si es una respuesta, un cambio
-   directo o una feature.
-3. **El agente hace el cambio, lo comprueba y hace commit** en la rama.
+2. **Da la tarea**, con tus palabras, o di **«siguiente tarea»** si hay plan.
+3. **El agente la lleva hasta el final**: mide su tamaño, planifica, implementa con tests, revisa
+   y hace commit en la rama. Solo te pregunta si el alcance es ambiguo o la tarea es grande.
 4. **Tú revisas y publicas:**
    ```bash
    git log --oneline main..      # qué commits ha hecho
@@ -63,33 +65,87 @@ node .harness/doctor.mjs                                    # comprobar que todo
 | --- | --- | --- |
 | Reglas | `AGENTS.md` (bloque marcado) | Lo único que se carga siempre: unos 1.000 tokens. |
 | Memoria | `docs/project.md`, `docs/decisions.md`, `docs/features/` | Lo que debe sobrevivir al chat. Markdown en git. |
-| Skills | `.agents/skills/<nombre>/SKILL.md` | Seis procedimientos que se leen solo cuando hacen falta. |
+| Skills | `.agents/skills/<nombre>/SKILL.md` | Procedimientos que se leen solo cuando hacen falta. |
+| Roles | `.agents/roles/` y `agents/` de cada agente | Implementador y revisor, como subagentes nativos. |
 | Hooks | `.harness/hooks/` | Estado al iniciar sesión y guardia de comandos. |
 | Cableado | `.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.opencode/` | Conecta lo anterior con cada agente. |
 | Diagnóstico | `.harness/doctor.mjs` | `node .harness/doctor.mjs` comprueba que todo sigue en su sitio. |
 
 ## Cómo se trabaja
 
-Cada petición va por uno de tres carriles, y el agente dice cuál:
+Cada petición va por uno de dos carriles:
 
 1. **Responder.** Preguntas, explicaciones, propuestas. No se escribe nada.
-2. **Cambio directo.** Un cambio entendido, de riesgo acotado, que se retoma desde `git diff`.
-   Se hace, se comprueba y se acaba. Sin documento y sin subagentes.
-3. **Feature.** Trabajo que no se podría retomar desde el diff: varias sesiones, requisitos largos
-   o riesgo alto. Tiene rama propia y un documento en `docs/features/<slug>.md` con el objetivo
-   literal, el plan, la evidencia y el siguiente paso.
+2. **Tarea.** Cualquier petición de construir, cambiar o arreglar. El agente mide la tarea y aplica
+   el proceso en proporción a su tamaño:
 
-Un día normal:
+| Tamaño | Qué es | Qué ocurre | Modelo |
+| --- | --- | --- | --- |
+| **S** | Cambio localizado, sin decisiones | El agente lo hace directo: test, cambio, commit. Sin subagentes. | El de la sesión |
+| **M** | Comportamiento nuevo, varios archivos | Plan breve → un implementador → verificación → un revisor con contexto limpio | Estándar |
+| **L** | Decisiones acopladas, lógica difícil o riesgo alto | Plan que **tú apruebas** → implementador → verificación → dos revisores (corrección y seguridad) | Avanzado |
+
+Todo cambio lleva su test, escrito antes que el código. El agente principal vuelve a ejecutar los
+tests él mismo: no se fía del informe del implementador. Los hallazgos de la revisión se corrigen
+en dos rondas como máximo; lo que quede, lo decides tú.
+
+No todas las tareas pasan por subagentes a propósito. Un subagente arranca sin contexto y relee el
+proyecto, así que en una tarea pequeña cuesta más de lo que aporta.
+
+### Empezar un proyecto
 
 ```text
-tú      «añade login con email»
-agente  carril 3 → skill feature: rama feat/login + docs/features/login.md, implementa tarea a tarea
+tú      «planifica el proyecto: una app para gestionar reservas de un gimnasio»
+agente  skill project-plan: pregunta lo imprescindible, fija stack y decisiones,
+        escribe docs/plan.md y espera tu visto bueno
+
+docs/plan.md
+  ## Hito 1 — Reservar una clase de extremo a extremo
+  - [ ] **T01** [S] Esqueleto con tests y lint · prueba: npm test pasa
+  - [ ] **T02** [M] Alta de usuarios · depende: T01 · prueba: test de alta y de email duplicado
+  - [ ] **T03** [L] Sesiones y permisos · depende: T02 · riesgo: alto
+  ## Hito 2 — Pagos
+  Por detallar.
+
+tú      «siguiente tarea»
+agente  skill task: T01, tamaño S → la hace directa y la marca
+tú      «siguiente tarea»
+agente  skill task: T02, tamaño M → plan, implementador, verificación, revisor, commit
+```
+
+Solo se detalla tarea a tarea el primer hito; los siguientes se detallan al llegar. Al iniciar
+cada sesión el agente ve el progreso del plan y cuál es la siguiente tarea.
+
+### Qué modelo se usa
+
+El plan asigna un tamaño a cada tarea y `.harness/config.json` dice qué modelo corresponde:
+
+```json
+"models": {
+  "claude": { "economico": "haiku", "estandar": "sonnet", "avanzado": "opus" },
+  "codex":  { "economico": "", "estandar": "", "avanzado": "" }
+}
+```
+
+- En Claude Code viene configurado. En el resto de agentes está vacío, que significa «el modelo de
+  la sesión»: pon ahí los nombres de modelo de tu cuenta y vuelve a ejecutar el instalador.
+- Las tareas S sueltas las hace la sesión directamente. Las S del plan, ejecutadas en serie, van al
+  modelo económico si hay uno configurado.
+- Si el implementador falla la verificación dos veces, el agente sube un nivel en lugar de insistir.
+- El revisor nunca usa un modelo inferior al del implementador.
+- El ahorro grande está en la planificación: partir una tarea L en una parte difícil y varias S o M
+  mecánicas hace que casi todo el trabajo corra en modelos baratos.
+- El modelo de la sesión principal lo eliges tú. Conviene uno potente para planificar y orquestar.
+
+### Continuar otro día
+
+```text
 tú      «lo dejamos aquí»
 agente  skill handoff: anota el siguiente paso y hace commit
 
 (otra sesión, otro día, otro agente u otra persona)
 
-inicio  el hook inyecta: rama, feature de esta rama, tareas 2/5, siguiente paso
+inicio  el hook inyecta: rama, feature de esta rama, tareas 2/5, siguiente paso, progreso del plan
 tú      «sigue»
 agente  skill resume: lee el documento y continúa desde el siguiente paso
 ```
@@ -98,11 +154,12 @@ agente  skill resume: lee el documento y continúa desde el siguiente paso
 
 | Skill | Cuándo |
 | --- | --- |
-| `setup` | Primera vez en el proyecto. |
-| `feature` | Empezar un trabajo del carril 3. |
+| `task` | Cualquier petición que cambie código, o «siguiente tarea». Es el punto de entrada. |
+| `project-plan` | Empezar un proyecto o un hito: lo divide en tareas con tamaño. |
+| `setup` | Primera vez en un proyecto que ya existe. |
 | `resume` | Retomar una feature en una sesión nueva. |
 | `verify` | Antes de dar algo por hecho: se marca lo comprobado, no lo que parece correcto. |
-| `review` | Antes de fusionar. Profundidad según el riesgo; verificador independiente solo si es alto. |
+| `review` | Revisión a petición tuya, fuera de una tarea. |
 | `handoff` | Al cerrar la sesión o cuando el contexto se llena. |
 
 ### Skills de tecnología
@@ -129,7 +186,8 @@ Para elegirlas a mano: `--stack react,database`, o `--stack none` para no instal
 - **Skills bajo demanda.** Se paga su descripción; el cuerpo se lee cuando se usa.
 - **`docs/project.md` en lugar de explorar.** 60 líneas con stack, comandos y mapa del código.
 - **Estado de inicio con tope.** 1.500 caracteres como máximo (`maxContextChars` en `.harness/config.json`).
-- **Directo por defecto.** Un subagente arranca sin caché y relee el repo; solo se delega con un motivo nombrado.
+- **Proceso proporcional.** Las tareas S se hacen directas; los subagentes solo entran en M y L.
+- **Modelo según el tamaño.** Las tareas fáciles corren en el modelo económico y solo las difíciles en el avanzado.
 - **Los documentos se pasan por ruta**, no resumidos.
 
 ## En equipo
@@ -152,6 +210,21 @@ El guardia solo ve los comandos que ejecuta el agente. Lo que tú hagas en tu te
 | Cursor | `AGENTS.md` | `.agents/skills/` | `.cursor/hooks.json` | pregunta al usuario |
 | Gemini CLI | `AGENTS.md` vía `context.fileName` | `.agents/skills/` | `.gemini/settings.json` | bloquea y pide confirmar |
 | OpenCode | `AGENTS.md` | `.agents/skills/` | plugin | bloquea y pide confirmar |
+
+**Subagentes.** Se instalan `implementer` y `reviewer` en el formato nativo de cada agente:
+
+| Agente | Dónde | Cómo recibe el modelo |
+| --- | --- | --- |
+| Claude Code | `.claude/agents/*.md` | La skill `task` lo pasa en cada lanzamiento |
+| Codex | `.codex/agents/*.toml` | Fijado en la definición |
+| Cursor | `.cursor/agents/*.md` | Fijado en la definición |
+| Gemini CLI | `.gemini/agents/*.md` | Fijado en la definición |
+| OpenCode | `.opencode/agents/*.md` | Fijado en la definición |
+
+Donde el modelo va fijado, al rellenar `models` y volver a ejecutar el instalador se genera una
+variante por nivel: `implementer-economico`, `implementer`, `implementer-avanzado`, `reviewer` y
+`reviewer-avanzado`. Sin modelos configurados hay un solo `implementer` y un solo `reviewer`, que
+usan el modelo de la sesión. Todas las definiciones apuntan al mismo rol en `.agents/roles/`.
 
 **Qué está probado.** Los tests cubren el instalador, la lógica de los hooks y el formato de salida
 de cada agente. Los formatos de Codex, Cursor, Gemini y OpenCode están tomados de cómo los cablea
@@ -196,7 +269,9 @@ template/
   AGENTS.block.md      reglas siempre cargadas
   harness/hooks/       lib.mjs (lógica), session-start.mjs, guard.mjs
   harness/doctor.mjs   diagnóstico
-  skills/              las seis skills
+  skills/              skills de flujo (task, project-plan, setup, resume, verify, review, handoff)
+  skills-stack/        skills de tecnología, se instalan según el proyecto
+  roles/               instrucciones del implementador y del revisor
   docs/                plantillas de la memoria
   opencode/harness.js  plugin de OpenCode
 test/                  node:test

@@ -55,9 +55,24 @@ export function features(root = ROOT) {
   });
 }
 
+/** Tareas de docs/plan.md. El formato de línea lo fija la skill project-plan. */
+export function planTasks(root = ROOT) {
+  let text = '';
+  try { text = readFileSync(join(root, 'docs', 'plan.md'), 'utf8').replace(/\r\n/g, '\n'); } catch { return []; }
+  return [...text.matchAll(/^- \[( |x|X)\] \*\*(T\d+)\*\* \[(S|M|L)\] (.+)$/gm)].map((m) => ({
+    done: m[1] !== ' ',
+    id: m[2],
+    size: m[3],
+    title: m[4].split(' · ')[0].trim(),
+  }));
+}
+
+const TIERS = [['S', 'economico'], ['M', 'estandar'], ['L', 'avanzado']];
+
 /** Lo que se inyecta al iniciar sesión. Tope duro de tamaño: es contexto que se paga en cada sesión. */
-export function buildContext(root = ROOT) {
-  const max = config(root).maxContextChars || 1500;
+export function buildContext(root = ROOT, agent = '') {
+  const cfg = config(root);
+  const max = cfg.maxContextChars || 1500;
   const lines = ['## Estado del proyecto'];
   const branch = currentBranch(root);
   if (branch) {
@@ -81,10 +96,19 @@ export function buildContext(root = ROOT) {
     }
   }
   if (!active.length) lines.push('Sin feature activa.');
+  const tasks = planTasks(root);
+  if (tasks.length) {
+    const next = tasks.find((t) => !t.done);
+    const doneCount = tasks.filter((t) => t.done).length;
+    lines.push(`Plan (docs/plan.md): ${doneCount}/${tasks.length} tareas hechas${next ? ` · siguiente: ${next.id} [${next.size}] ${next.title.slice(0, 100)}` : ' · completado'}`);
+  }
+  const models = cfg.models?.[agent] || {};
+  const tiers = TIERS.filter(([, tier]) => models[tier]).map(([size, tier]) => `${size}→${models[tier]}`);
+  if (tiers.length) lines.push(`Modelos por tamaño de tarea: ${tiers.join(' · ')}`);
   let project = '';
   try { project = readFileSync(join(root, 'docs', 'project.md'), 'utf8'); } catch { /* sin project.md */ }
   if (!project || project.includes('harness:pendiente')) {
-    lines.push('docs/project.md está sin rellenar: usa la skill `setup` antes de trabajar.');
+    lines.push('docs/project.md está sin rellenar: usa la skill `project-plan` si el proyecto es nuevo, o `setup` si ya existe.');
   }
   lines.push(`${active.length ? 'Lee el documento de la feature antes de actuar. ' : ''}Contexto: docs/project.md · decisiones: docs/decisions.md`);
   const text = lines.join('\n');

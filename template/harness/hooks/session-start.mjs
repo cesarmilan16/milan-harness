@@ -6,7 +6,7 @@ import { buildContext } from './lib.mjs';
 
 const agent = process.argv[2];
 let text = '';
-try { text = buildContext(); } catch { /* nunca romper el arranque de una sesión */ }
+try { text = buildContext(undefined, agent); } catch { /* nunca romper el arranque de una sesión */ }
 if (!text) process.exit(0);
 
 if (!agent) console.log(text);

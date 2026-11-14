@@ -31,8 +31,9 @@ test('instala todos los agentes y el doctor sale sano', () => {
   const result = install();
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Sano/);
-  for (const path of ['.harness/hooks/lib.mjs', '.agents/skills/feature/SKILL.md', 'docs/project.md', 'CLAUDE.md',
-    '.claude/skills/feature/SKILL.md', '.codex/hooks.json', '.cursor/hooks.json', '.gemini/settings.json', '.opencode/plugins/harness.js']) {
+  for (const path of ['.harness/hooks/lib.mjs', '.agents/skills/task/SKILL.md', '.agents/roles/reviewer.md', '.claude/agents/implementer.md', '.codex/agents/reviewer.toml',
+    '.cursor/agents/implementer.md', '.gemini/agents/reviewer.md', '.opencode/agents/implementer.md', 'docs/project.md', 'CLAUDE.md',
+    '.claude/skills/task/SKILL.md', '.codex/hooks.json', '.cursor/hooks.json', '.gemini/settings.json', '.opencode/plugins/harness.js']) {
     assert.ok(existsSync(join(project, path)), `falta ${path}`);
   }
   const agentsMd = readFileSync(join(project, 'AGENTS.md'), 'utf8');
@@ -176,13 +177,70 @@ test('--team protege main: ni commit ni push directos, y sin atajo de confirmaci
   assert.equal(hook('guard', 'codex', bash('HARNESS_OK=1 git commit -m "directo"')).status, 2);
 });
 
+test('el inicio de sesión muestra el progreso del plan y los modelos del agente', () => {
+  writeFileSync(join(project, 'docs', 'plan.md'), [
+    '# Plan', '', '## Hito 1 — Base', '',
+    '- [x] **T01** [S] Esqueleto con tests · prueba: npm test',
+    '- [ ] **T02** [M] Registro de usuarios · depende: T01 · prueba: test de alta',
+    '- [ ] **T03** [L] Sesiones y permisos · depende: T02 · riesgo: alto',
+    '- [ ] una línea que no sigue el formato', '',
+  ].join('\n'));
+  try {
+    const claude = JSON.parse(hook('session-start', 'claude', {}).stdout).hookSpecificOutput.additionalContext;
+    assert.match(claude, /Plan \(docs\/plan\.md\): 1\/3 tareas hechas · siguiente: T02 \[M\] Registro de usuarios$/m);
+    assert.match(claude, /Modelos por tamaño de tarea: S→haiku · M→sonnet · L→opus/);
+    // Sin modelos configurados no se promete nada: se usa el de la sesión.
+    assert.doesNotMatch(JSON.parse(hook('session-start', 'codex', {}).stdout).hookSpecificOutput.additionalContext, /Modelos por tamaño/);
+
+    const path = join(project, '.harness', 'config.json');
+    const cfg = json('.harness', 'config.json');
+    cfg.models.claude.avanzado = 'mi-modelo';
+    writeFileSync(path, JSON.stringify(cfg));
+    assert.equal(install().status, 0);
+    assert.equal(json('.harness', 'config.json').models.claude.avanzado, 'mi-modelo');
+  } finally {
+    rmSync(join(project, 'docs', 'plan.md'));
+  }
+});
+
+test('no pisa un subagente propio con el mismo nombre', () => {
+  const path = join(project, '.claude', 'agents', 'reviewer.md');
+  const original = readFileSync(path, 'utf8');
+  writeFileSync(path, '---\nname: reviewer\ndescription: el mío\n---\nMi revisor.\n');
+  assert.match(install().stdout, /NO TOCADO\s+\.claude\/agents\/reviewer\.md/);
+  assert.match(readFileSync(path, 'utf8'), /Mi revisor/);
+  writeFileSync(path, original);
+});
+
+test('con modelos configurados genera una variante de subagente por nivel', () => {
+  const agentsDir = (agent) => readdirSync(join(project, `.${agent}`, 'agents')).sort();
+  assert.deepEqual(agentsDir('codex'), ['implementer.toml', 'reviewer.toml']);
+  assert.doesNotMatch(readFileSync(join(project, '.codex', 'agents', 'implementer.toml'), 'utf8'), /^model =/m);
+  assert.match(readFileSync(join(project, '.cursor', 'agents', 'reviewer.md'), 'utf8'), /model: inherit\nreadonly: true/);
+  assert.match(readFileSync(join(project, '.opencode', 'agents', 'reviewer.md'), 'utf8'), /mode: subagent\ntools:\n  edit: false/);
+
+  const path = join(project, '.harness', 'config.json');
+  const cfg = json('.harness', 'config.json');
+  cfg.models.codex = { economico: 'barato', estandar: 'medio', avanzado: 'caro' };
+  writeFileSync(path, JSON.stringify(cfg));
+  assert.equal(install().status, 0);
+  assert.deepEqual(agentsDir('codex'), ['implementer-avanzado.toml', 'implementer-economico.toml', 'implementer.toml', 'reviewer-avanzado.toml', 'reviewer.toml']);
+  const cheap = readFileSync(join(project, '.codex', 'agents', 'implementer-economico.toml'), 'utf8');
+  assert.match(cheap, /name = "implementer-economico"/);
+  assert.match(cheap, /model = "barato"/);
+  assert.match(readFileSync(join(project, '.codex', 'agents', 'reviewer-avanzado.toml'), 'utf8'), /model = "caro"/);
+  // Claude Code recibe el modelo al lanzar: nunca variantes.
+  assert.deepEqual(agentsDir('claude'), ['implementer.md', 'reviewer.md']);
+  assert.match(JSON.parse(hook('session-start', 'codex', {}).stdout).hookSpecificOutput.additionalContext, /S→barato · M→medio · L→caro/);
+});
+
 test('instala las skills del stack detectado, también en subcarpetas', () => {
   const other = mkdtempSync(join(tmpdir(), 'harness-test-'));
   const skills = () => readdirSync(join(other, '.agents', 'skills')).sort();
   const run = (...args) => spawnSync(process.execPath, [INSTALL, other, '--agents', 'claude', ...args], { encoding: 'utf8' });
   try {
     assert.equal(run().status, 0);
-    assert.deepEqual(skills(), ['architecture', 'feature', 'handoff', 'resume', 'review', 'setup', 'verify']);
+    assert.deepEqual(skills(), ['architecture', 'handoff', 'project-plan', 'resume', 'review', 'setup', 'task', 'verify']);
 
     mkdirSync(join(other, 'web'));
     mkdirSync(join(other, 'api'));
@@ -190,7 +248,7 @@ test('instala las skills del stack detectado, también en subcarpetas', () => {
     writeFileSync(join(other, 'api', 'requirements.txt'), 'fastapi==0.115\nsqlalchemy>=2\n');
     const result = run();
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.deepEqual(skills(), ['architecture', 'database', 'fastapi', 'feature', 'handoff', 'nextjs', 'react', 'resume', 'review', 'setup', 'verify']);
+    assert.deepEqual(skills(), ['architecture', 'database', 'fastapi', 'handoff', 'nextjs', 'project-plan', 'react', 'resume', 'review', 'setup', 'task', 'verify']);
     assert.ok(existsSync(join(other, '.claude', 'skills', 'nextjs', 'SKILL.md')));
     assert.ok(!existsSync(join(other, '.agents', 'skills', 'django')));
 

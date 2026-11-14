@@ -1,6 +1,6 @@
 ---
 name: review
-description: Revisa un cambio terminado con una profundidad proporcional a su riesgo, antes de fusionarlo o abrir un pull request. Úsala para cambios de riesgo medio o alto, o cuando el usuario pida una revisión.
+description: Revisa un cambio terminado con una profundidad proporcional a su riesgo, antes de fusionarlo o abrir un pull request. Úsala cuando el usuario pida una revisión fuera de una tarea; dentro de una tarea, la revisión ya la dirige la skill task.
 ---
 # review
 
@@ -18,7 +18,7 @@ Primero la skill `verify`: no se revisa lo que no pasa sus comprobaciones.
 | Medio | Código ordinario con tests | Relee tú el diff completo con la lista de abajo. |
 | Alto | Datos y migraciones, autenticación, pagos, CI y despliegue, contratos compartidos, código sin test que detecte la regresión | Verificador independiente. |
 
-**Verificador independiente**: un subagente con contexto limpio, o una sesión nueva si el agente no tiene subagentes. Recibe la ruta del documento de la feature y el diff. No recibe tu razonamiento ni tu resumen. Nunca es la misma sesión que escribió el cambio.
+**Verificador independiente**: un subagente `reviewer` con contexto limpio (rol en `.agents/roles/reviewer.md`), o una sesión nueva si el agente no tiene subagentes. Recibe la ruta del documento de la feature y el rango de commits. No recibe tu razonamiento ni tu resumen. Nunca es la misma sesión que escribió el cambio. Con riesgo alto, lanza dos a la vez: lentes `correccion` y `seguridad`.
 
 ## 3. Qué mirar
 

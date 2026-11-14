@@ -15,6 +15,13 @@ const TPL = join(HERE, 'template');
 const VERSION = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version;
 const ALL_AGENTS = ['claude', 'codex', 'cursor', 'gemini', 'opencode'];
 const MARK = '.harness/hooks/';
+// Solo se rellenan los alias que Claude Code acepta al lanzar un subagente. En el resto de agentes los
+// nombres de modelo dependen de la cuenta y cambian a menudo: los pone el equipo en .harness/config.json.
+const NO_MODELS = { economico: '', estandar: '', avanzado: '' };
+const DEFAULT_MODELS = {
+  claude: { economico: 'haiku', estandar: 'sonnet', avanzado: 'opus' },
+  codex: NO_MODELS, cursor: NO_MODELS, gemini: NO_MODELS, opencode: NO_MODELS,
+};
 const BLOCK_START = '<!-- harness:start';
 const BLOCK_END = '<!-- harness:end -->';
 
@@ -144,10 +151,14 @@ editJson(join(target, '.harness', 'config.json'), (cfg) => {
   cfg.stack = stack;
   cfg.protectedBranches = flag('team') ? ['main', 'master'] : (cfg.protectedBranches || []);
   cfg.agentPush ||= 'ask';
+  // Modelo por tamaño de tarea (S, M, L). Vacío = el modelo de la sesión. Lo que ya hubiera se respeta.
+  cfg.models ||= {};
+  for (const agent of agents) cfg.models[agent] ||= { ...DEFAULT_MODELS[agent] };
   cfg.maxContextChars ||= 1500;
 });
 copyTree(join(TPL, 'skills'), join(target, '.agents', 'skills'));
 for (const name of stack) copyTree(join(TPL, 'skills-stack', name), join(target, '.agents', 'skills', name));
+copyTree(join(TPL, 'roles'), join(target, '.agents', 'roles'));
 copyTree(join(TPL, 'docs'), join(target, 'docs'));
 
 const block = readFileSync(join(TPL, 'AGENTS.block.md'), 'utf8').trim();
@@ -228,7 +239,54 @@ const ADAPTERS = {
   },
 };
 
-for (const agent of agents) ADAPTERS[agent]();
+// ---------------------------------------------------------------- subagentes
+// Envoltorios finos en el formato nativo de cada agente; el rol real está en .agents/roles/.
+
+const ROLES = {
+  implementer: {
+    desc: 'Implementa tareas ya planificadas con el test primero. Lo lanza la skill task; no sirve para planificar ni para revisar.',
+    body: 'Lee `.agents/roles/implementer.md` y síguelo al pie de la letra. El mensaje que recibes indica el documento de la feature (o la línea de docs/plan.md) y las tareas que te tocan.',
+    readonly: false,
+  },
+  reviewer: {
+    desc: 'Revisa con contexto limpio un cambio terminado contra su documento de feature. Solo lectura. Lo lanza la skill task o la skill review.',
+    body: 'Lee `.agents/roles/reviewer.md` y síguelo al pie de la letra. El mensaje que recibes indica el documento de la feature, el rango de commits y la lente.',
+    readonly: true,
+  },
+};
+
+const frontmatter = (lines, body) => `---\n${lines.filter(Boolean).join('\n')}\n---\n<!-- harness:managed -->\n${body}\n`;
+const SUBAGENTS = {
+  claude: { dir: '.claude/agents', ext: '.md', render: (name, r) => frontmatter([`name: ${name}`, `description: "${r.desc}"`, r.readonly && 'tools: Read, Grep, Glob, Bash'], r.body) },
+  cursor: { dir: '.cursor/agents', ext: '.md', render: (name, r, model) => frontmatter([`name: ${name}`, `description: "${r.desc}"`, `model: ${model || 'inherit'}`, `readonly: ${r.readonly}`], r.body) },
+  gemini: { dir: '.gemini/agents', ext: '.md', render: (name, r, model) => frontmatter([`name: ${name}`, `description: "${r.desc}"`, model && `model: ${model}`], r.body) },
+  opencode: { dir: '.opencode/agents', ext: '.md', render: (name, r, model) => frontmatter([`description: "${r.desc}"`, 'mode: subagent', model && `model: ${model}`, r.readonly && 'tools:\n  edit: false\n  write: false\n  patch: false'], r.body) },
+  codex: { dir: '.codex/agents', ext: '.toml', render: (name, r, model) => `# harness:managed\nname = "${name}"\ndescription = "${r.desc}"\n${model ? `model = "${model}"\n` : ''}developer_instructions = '''\n${r.body}\n'''\n` },
+};
+
+/** Claude Code recibe el modelo en cada lanzamiento. En el resto va fijado en la definición, así que
+ *  con modelos configurados se genera una variante por nivel: implementer-economico, implementer-avanzado… */
+function subagentVariants(agent) {
+  const models = previous.models?.[agent] || DEFAULT_MODELS[agent];
+  if (agent === 'claude' || !(models.economico || models.estandar || models.avanzado)) {
+    return Object.keys(ROLES).map((role) => [role, role, '']);
+  }
+  const variants = [['implementer', 'implementer', models.estandar], ['reviewer', 'reviewer', models.estandar]];
+  if (models.economico) variants.push(['implementer-economico', 'implementer', models.economico]);
+  if (models.avanzado) variants.push(['implementer-avanzado', 'implementer', models.avanzado], ['reviewer-avanzado', 'reviewer', models.avanzado]);
+  return variants;
+}
+
+for (const agent of agents) {
+  ADAPTERS[agent]();
+  const { dir, ext, render } = SUBAGENTS[agent];
+  for (const [name, role, model] of subagentVariants(agent)) {
+    const path = join(target, ...dir.split('/'), `${name}${ext}`);
+    const existing = read(path);
+    if (existing !== null && !existing.includes('harness:managed')) note('NO TOCADO', path);
+    else write(path, render(name, ROLES[role], model), { managed: true });
+  }
+}
 
 // ---------------------------------------------------------------- resultado
 
@@ -245,7 +303,7 @@ if (spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: target }).st
 console.log('');
 const status = runDoctor(target);
 if (status === 0) {
-  console.log('\nSiguiente paso: abre tu agente en el proyecto y pídele «usa la skill setup».');
+  console.log('\nSiguiente paso: abre tu agente en el proyecto y dile «planifica el proyecto» si es nuevo, o «usa la skill setup» si ya existe.');
   if (agents.includes('codex')) console.log('Codex: ejecuta /hooks una vez para confiar en los hooks del proyecto.');
 }
 process.exit(status);

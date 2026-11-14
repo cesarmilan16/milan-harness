@@ -3,7 +3,7 @@
 //   node .harness/doctor.mjs
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT, buildContext, checkCommand, config, features, git } from './hooks/lib.mjs';
+import { ROOT, buildContext, checkCommand, config, features, git, planTasks } from './hooks/lib.mjs';
 
 let errors = 0;
 let warnings = 0;
@@ -33,7 +33,7 @@ else {
 // --- memoria
 const project = read('docs', 'project.md');
 if (project === null) fail('falta docs/project.md');
-else if (project.includes('harness:pendiente')) warn('docs/project.md sin rellenar: pide al agente la skill `setup`');
+else if (project.includes('harness:pendiente')) warn('docs/project.md sin rellenar: dile al agente «planifica el proyecto» si es nuevo, o «usa la skill setup» si ya existe');
 else (project.split('\n').length > 80 ? warn : ok)(`docs/project.md: ${project.split('\n').length} líneas${project.split('\n').length > 80 ? ' — demasiado largo, se lee en cada tarea' : ''}`);
 if (read('docs', 'decisions.md') === null) fail('falta docs/decisions.md');
 if (read('docs', 'features', '_template.md') === null) fail('falta docs/features/_template.md');
@@ -54,6 +54,20 @@ for (const name of skills) {
 }
 if (skills.length) ok(`${skills.length} skills: ${skills.join(', ')}`);
 
+for (const role of ['implementer', 'reviewer']) {
+  if (read('.agents', 'roles', `${role}.md`) === null) fail(`falta .agents/roles/${role}.md`);
+}
+
+// --- plan y modelos
+const tasks = planTasks();
+if (read('docs', 'plan.md') !== null && !tasks.length) warn('docs/plan.md existe pero ninguna línea sigue el formato «- [ ] **T01** [S] Título»');
+else if (tasks.length) ok(`plan: ${tasks.filter((t) => t.done).length}/${tasks.length} tareas hechas (S ${tasks.filter((t) => t.size === 'S').length}, M ${tasks.filter((t) => t.size === 'M').length}, L ${tasks.filter((t) => t.size === 'L').length})`);
+for (const agent of cfg.agents || []) {
+  const m = cfg.models?.[agent] || {};
+  if (m.economico || m.estandar || m.avanzado) ok(`modelos ${agent}: S→${m.economico || 'sesión'} · M→${m.estandar || 'sesión'} · L→${m.avanzado || 'sesión'}`);
+  else console.log(`  info    modelos ${agent}: sin configurar, todo usa el modelo de la sesión (.harness/config.json → models)`);
+}
+
 // --- cableado por agente
 const WIRING = {
   claude: ['.claude/settings.json', '.harness/hooks/'],
@@ -71,7 +85,10 @@ for (const agent of cfg.agents || []) {
     if (missing.length) { fail(`claude: skills sin enlazar en .claude/skills/: ${missing.join(', ')}`); continue; }
     if (!read('CLAUDE.md')?.includes('AGENTS.md')) { fail('claude: CLAUDE.md no importa AGENTS.md'); continue; }
   }
-  ok(`${agent}: cableado en ${file}`);
+  const ext = agent === 'codex' ? 'toml' : 'md';
+  const noAgent = ['implementer', 'reviewer'].filter((a) => read(`.${agent}`, 'agents', `${a}.${ext}`) === null);
+  if (noAgent.length) { fail(`${agent}: faltan subagentes en .${agent}/agents/: ${noAgent.join(', ')}`); continue; }
+  ok(`${agent}: cableado en ${file}, subagentes en .${agent}/agents/`);
 }
 
 // --- autotest de los hooks

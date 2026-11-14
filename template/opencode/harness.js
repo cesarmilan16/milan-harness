@@ -12,7 +12,7 @@ export const HarnessPlugin = async ({ directory, worktree }) => {
       const id = input?.sessionID || 'default';
       if (!contextBySession.has(id)) {
         let text = '';
-        try { text = buildContext(root); } catch { /* nunca romper la sesión */ }
+        try { text = buildContext(root, 'opencode'); } catch { /* nunca romper la sesión */ }
         contextBySession.set(id, text);
       }
       const text = contextBySession.get(id);

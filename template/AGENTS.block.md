@@ -4,23 +4,21 @@
 **Memoria.** El chat se pierde; `docs/` no. Al iniciar sesión recibes un bloque «Estado del proyecto»; si no lo has recibido, ejecuta `node .harness/hooks/session-start.mjs`. Lee solo lo que la tarea necesite:
 - `docs/project.md` — qué es el proyecto, stack y comandos. Léelo en vez de explorar el repo.
 - `docs/decisions.md` — decisiones tomadas y su porqué. Consúltalo antes de preguntar o de volver a decidir algo.
+- `docs/plan.md` — las tareas del proyecto, con su tamaño. Puede no existir.
 - `docs/features/<slug>.md` — un documento por trabajo en curso. Es la fuente de verdad de ese trabajo.
 
-**Tres carriles.** Elige uno por petición y dilo en una línea.
+**Dos carriles.** Elige uno por petición.
 1. **Responder** — preguntas, explicaciones, revisiones, propuestas. Solo lectura: no escribas nada.
-2. **Cambio directo** — cambio entendido, riesgo acotado y retomable desde `git diff`. Hazlo, compruébalo y termina. Sin documento y sin subagentes, toque los archivos que toque.
-3. **Feature** — el trabajo no se podría retomar solo desde el diff: varias sesiones, requisitos largos, decisiones que dependen unas de otras, o riesgo alto. Usa la skill `feature`.
+2. **Tarea** — cualquier petición de construir, cambiar o arreglar. Usa la skill `task`: mide la tarea (S, M, L) y la lleva de principio a fin con tests y revisión. El usuario da la tarea y tú procedes.
 
-Si la intención no está clara, haz una sola pregunta y quédate en el carril 1.
+Si no está claro si te piden un cambio, haz una sola pregunta y quédate en el carril 1.
 
-**Hecho significa comprobado.** Una tarea se marca cuando has observado la prueba (test, comando, salida), no cuando crees que funciona. Si no pudiste comprobar algo, dilo.
-
-**Riesgo alto**: datos y migraciones, autenticación y permisos, pagos, CI y despliegue, contratos compartidos entre módulos, o código sin un test que detectaría la regresión. Exige carril 3 y la skill `review`.
+**Hecho significa comprobado.** Todo cambio de comportamiento lleva su test, escrito antes que el código cuando es posible. Una tarea se marca cuando has observado la prueba, no cuando crees que funciona. Si no pudiste comprobar algo, dilo.
 
 **Gasto de tokens.**
 - Busca antes de leer; lee rangos, no archivos enteros; no releas lo que ya tienes en contexto.
-- Trabaja directo por defecto. Delega en un subagente solo si puedes nombrar el motivo: (a) exploración que pide más de unas cinco búsquedas encadenadas; (b) dos o más unidades independientes, con archivos disjuntos y varios minutos de trabajo cada una; (c) sesión muy larga, para pasar la siguiente unidad a un contexto limpio; (d) verificador independiente de un cambio de riesgo alto. En la duda, directo.
-- Al delegar, pasa la ruta del documento de la feature, no un resumen suyo.
+- Las tareas S se hacen directas. Los subagentes y el modelo de cada uno los decide la skill `task` según el tamaño; fuera de ella, no delegues sin un motivo que puedas nombrar.
+- Al delegar, pasa la ruta del documento, no un resumen suyo.
 - Respuestas cortas: el resultado primero, sin repetir el diff.
 
 **Equipo y git.**
@@ -32,11 +30,12 @@ Si la intención no está clara, haz una sola pregunta y quédate en el carril 1
 - No leas, imprimas ni añadas a un commit secretos (`.env`, claves, tokens).
 
 **Skills.** Están en `.agents/skills/<nombre>/SKILL.md`. Lee una solo cuando toque:
-- `setup` — primera vez en el proyecto, o `docs/project.md` sin rellenar.
-- `feature` — empezar un trabajo del carril 3.
+- `task` — cualquier petición que cambie código, o «siguiente tarea».
+- `project-plan` — empezar un proyecto o un hito: lo divide en tareas con tamaño.
+- `setup` — primera vez en un proyecto que ya existe, o `docs/project.md` sin rellenar.
 - `resume` — retomar una feature en una sesión nueva.
 - `verify` — antes de dar algo por hecho.
-- `review` — antes de fusionar un cambio de riesgo medio o alto.
+- `review` — revisión a petición del usuario, fuera de una tarea.
 - `handoff` — al cerrar la sesión o cuando el contexto se esté llenando.
 
 Skills de tecnología, si están instaladas en esa carpeta: `architecture`, `react`, `nextjs`, `django`, `fastapi`, `database`. Lee la que corresponda antes de escribir código de esa tecnología o de diseñar algo nuevo.
